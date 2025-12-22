@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aplikasi Parkir</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+
+<div class="max-w-md mx-auto p-4">
+
+<h1 class="text-xl font-bold text-center mb-4">🚗 Aplikasi Parkir</h1>
+
+<!-- MENU -->
+<div class="grid grid-cols-2 gap-3 mb-4">
+  <button onclick="showMasuk()" class="bg-green-600 text-white py-3 rounded-xl font-semibold">
+    Parkir Masuk
+  </button>
+  <button onclick="showKeluar()" class="bg-red-600 text-white py-3 rounded-xl font-semibold">
+    Parkir Keluar
+  </button>
+</div>
+
+<!-- VIDEO SCAN -->
+<div id="scannerBox" class="hidden bg-black rounded-xl overflow-hidden mb-4">
+  <video id="video" class="w-full h-60 object-cover"></video>
+</div>
+
+<!-- PARKIR MASUK -->
+<div id="masuk" class="bg-white rounded-xl shadow p-4 hidden">
+  <h2 class="font-semibold mb-3">📸 Parkir Masuk</h2>
+
+  <button onclick="startScan('masuk')" class="w-full bg-blue-600 text-white py-2 rounded-lg mb-3">
+    📷 Scan Barcode Parkir
+  </button>
+
+  <input id="nomorMasuk" class="w-full border rounded-lg p-3 mb-3 text-lg" readonly>
+
+  <input type="file" accept="image/*" capture="environment"
+    id="fotoInput" class="w-full mb-3">
+
+  <button onclick="simpanMasuk()"
+    class="w-full bg-green-600 text-white py-3 rounded-xl font-semibold">
+    Simpan Parkir
+  </button>
+</div>
+
+<!-- PARKIR KELUAR -->
+<div id="keluar" class="bg-white rounded-xl shadow p-4 hidden">
+  <h2 class="font-semibold mb-3">🔍 Parkir Keluar</h2>
+
+  <button onclick="startScan('keluar')" class="w-full bg-blue-600 text-white py-2 rounded-lg mb-3">
+    📷 Scan Barcode Parkir
+  </button>
+
+  <input id="nomorKeluar" class="w-full border rounded-lg p-3 mb-3 text-lg" readonly>
+
+  <img id="fotoKeluar" class="rounded-lg mb-3 hidden">
+
+  <button id="btnKeluar" onclick="prosesKeluar()"
+    class="w-full bg-red-600 text-white py-3 rounded-xl font-semibold hidden">
+    Kendaraan Keluar
+  </button>
+</div>
+
+</div>
+
+<script>
+let videoStream;
+let modeScan = "";
+const detector = ('BarcodeDetector' in window)
+  ? new BarcodeDetector({ formats: ['qr_code','code_128','ean_13'] })
+  : null;
+
+// ===== NAVIGASI =====
+function showMasuk(){
+  masuk.classList.remove("hidden");
+  keluar.classList.add("hidden");
+}
+function showKeluar(){
+  keluar.classList.remove("hidden");
+  masuk.classList.add("hidden");
+}
+
+// ===== START SCAN =====
+async function startScan(mode){
+  if(!detector){
+    alert("HP tidak mendukung scan barcode");
+    return;
+  }
+
+  modeScan = mode;
+  scannerBox.classList.remove("hidden");
+
+  videoStream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment" }
+  });
+
+  video.srcObject = videoStream;
+  video.play();
+
+  requestAnimationFrame(scanLoop);
+}
+
+// ===== SCAN LOOP =====
+async function scanLoop(){
+  if(video.readyState === video.HAVE_ENOUGH_DATA){
+    const barcodes = await detector.detect(video);
+    if(barcodes.length > 0){
+      stopScan();
+      const kode = barcodes[0].rawValue;
+
+      if(modeScan === "masuk"){
+        nomorMasuk.value = kode;
+      } else {
+        nomorKeluar.value = kode;
+        cekKeluar();
+      }
+      return;
+    }
+  }
+  requestAnimationFrame(scanLoop);
+}
+
+// ===== STOP SCAN =====
+function stopScan(){
+  scannerBox.classList.add("hidden");
+  if(videoStream){
+    videoStream.getTracks().forEach(t => t.stop());
+  }
+}
+
+// ===== SIMPAN MASUK =====
+function simpanMasuk(){
+  const nomor = nomorMasuk.value;
+  const file = fotoInput.files[0];
+
+  if(!nomor || !file){
+    alert("Scan barcode & ambil foto dulu");
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    localStorage.setItem("parkir_"+nomor, JSON.stringify({
+      nomor,
+      foto: e.target.result,
+      waktuMasuk: Date.now()
+    }));
+    alert("Parkir tersimpan");
+    nomorMasuk.value = "";
+    fotoInput.value = "";
+  };
+  reader.readAsDataURL(file);
+}
+
+// ===== CEK KELUAR =====
+function cekKeluar(){
+  const nomor = nomorKeluar.value;
+  const data = localStorage.getItem("parkir_"+nomor);
+
+  if(!data){
+    alert("Data tidak ditemukan");
+    return;
+  }
+
+  const obj = JSON.parse(data);
+  fotoKeluar.src = obj.foto;
+  fotoKeluar.classList.remove("hidden");
+  btnKeluar.classList.remove("hidden");
+}
+
+// ===== PROSES KELUAR =====
+function prosesKeluar(){
+  const nomor = nomorKeluar.value;
+  localStorage.removeItem("parkir_"+nomor);
+  alert("Kendaraan keluar");
+  nomorKeluar.value = "";
+  fotoKeluar.classList.add("hidden");
+  btnKeluar.classList.add("hidden");
+}
+</script>
+
+</body>
+</html>
