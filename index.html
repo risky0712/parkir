@@ -6,6 +6,7 @@
 <title>Parkir Barcode</title>
 <script src="https://cdn.tailwindcss.com"></script>
 </head>
+
 <body class="bg-gray-100">
 
 <div class="max-w-md mx-auto p-4">
@@ -49,11 +50,12 @@
 <script>
 /* ================= CONFIG ================= */
 const GAS_URL = "https://script.google.com/macros/s/AKfycbxZ2xlzIL84ucdHBQ9nsOQ8eLf3c5cONbx8CjiALFb8RodhPjdGU26mRRDwchSDHCYe/exec";
-let videoStream, scanMode, syncing=false;
+let videoStream, scanMode, syncing = false;
 
 /* ================= BARCODE ================= */
 const detector = 'BarcodeDetector' in window
-  ? new BarcodeDetector({formats:['qr_code','code_128']}) : null;
+  ? new BarcodeDetector({ formats:['qr_code','code_128'] })
+  : null;
 
 /* ================= UI ================= */
 function showMasuk(){ masuk.classList.remove('hidden'); keluar.classList.add('hidden'); }
@@ -63,7 +65,7 @@ function showKeluar(){ keluar.classList.remove('hidden'); masuk.classList.add('h
 async function startScan(mode){
   scanMode = mode;
   scannerBox.classList.remove('hidden');
-  videoStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+  videoStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' }});
   video.srcObject = videoStream;
   video.play();
   scanLoop();
@@ -75,8 +77,8 @@ async function scanLoop(){
     if(codes.length){
       stopScan();
       const kode = codes[0].rawValue;
-      if(scanMode==='masuk') nomorMasuk.value=kode;
-      else { nomorKeluar.value=kode; cekKeluar(); }
+      if(scanMode === 'masuk') nomorMasuk.value = kode;
+      else { nomorKeluar.value = kode; cekKeluar(); }
       return;
     }
   }
@@ -85,62 +87,125 @@ async function scanLoop(){
 
 function stopScan(){
   scannerBox.classList.add('hidden');
-  videoStream.getTracks().forEach(t=>t.stop());
+  if(videoStream) videoStream.getTracks().forEach(t => t.stop());
 }
 
 /* ================= MASUK ================= */
 function simpanMasuk(){
+  if(!nomorMasuk.value || !fotoInput.files[0]) return alert("Lengkapi data");
+
   const reader = new FileReader();
   reader.onload = e => {
-    localStorage.setItem("parkir_"+nomorMasuk.value, JSON.stringify({
+    localStorage.setItem("parkir_" + nomorMasuk.value, JSON.stringify({
       nomor: nomorMasuk.value,
       foto: e.target.result,
-      waktu: Date.now(),
+      waktuMasuk: Date.now(),
       status: "PARKIR",
       synced: false
     }));
-    alert("Tersimpan");
-    nomorMasuk.value=""; fotoInput.value="";
+    nomorMasuk.value = "";
+    fotoInput.value = "";
+    alert("Parkir masuk tersimpan");
   };
   reader.readAsDataURL(fotoInput.files[0]);
 }
 
-/* ================= KELUAR ================= */
-function cekKeluar(){
-  const d = JSON.parse(localStorage.getItem("parkir_"+nomorKeluar.value)||"null");
-  if(!d) return alert("Tidak ada data");
-  fotoKeluar.src=d.foto;
+/* ================= CEK KELUAR (LOCAL → SHEET) ================= */
+async function cekKeluar(){
+  const nomor = nomorKeluar.value;
+  let data = JSON.parse(localStorage.getItem("parkir_" + nomor) || "null");
+
+  // jika tidak ada di local, ambil dari spreadsheet
+  if(!data && navigator.onLine){
+    try{
+      const res = await fetch(GAS_URL);
+      const server = await res.json();
+      data = server.find(d => d.nomor === nomor && d.status === "PARKIR");
+    }catch{}
+  }
+
+  if(!data) return alert("Data tidak ditemukan");
+
+  fotoKeluar.src = data.foto;
   fotoKeluar.classList.remove('hidden');
   btnKeluar.classList.remove('hidden');
 }
 
+/* ================= PROSES KELUAR ================= */
 function prosesKeluar(){
-  const key="parkir_"+nomorKeluar.value;
-  const d=JSON.parse(localStorage.getItem(key));
-  d.status="KELUAR"; d.synced=false;
-  localStorage.setItem(key,JSON.stringify(d));
-  localStorage.removeItem(key);
-  alert("Keluar");
-  fotoKeluar.classList.add('hidden'); btnKeluar.classList.add('hidden');
+  const key = "parkir_" + nomorKeluar.value;
+  let d = JSON.parse(localStorage.getItem(key) || "{}");
+
+  d.status = "KELUAR";
+  d.waktuKeluar = Date.now();
+  d.synced = false;
+
+  localStorage.setItem(key, JSON.stringify(d));
+
+  // hapus lokal SETELAH ditandai keluar
+  setTimeout(() => localStorage.removeItem(key), 1000);
+
+  alert("Kendaraan keluar");
+  fotoKeluar.classList.add('hidden');
+  btnKeluar.classList.add('hidden');
+  nomorKeluar.value = "";
 }
 
-/* ================= BACKGROUND SYNC ================= */
+/* ================= SYNC KE SPREADSHEET ================= */
 async function backgroundSync(){
-  if(syncing||!navigator.onLine) return;
-  syncing=true;
+  if(syncing || !navigator.onLine) return;
+  syncing = true;
+
   for(const k of Object.keys(localStorage)){
     if(!k.startsWith("parkir_")) continue;
-    const d=JSON.parse(localStorage.getItem(k));
+    const d = JSON.parse(localStorage.getItem(k));
     if(d.synced) continue;
+
     try{
-      await fetch(GAS_URL,{method:"POST",body:JSON.stringify(d)});
-      d.synced=true;
-      localStorage.setItem(k,JSON.stringify(d));
+      await fetch(GAS_URL,{
+        method:"POST",
+        body: JSON.stringify(d)
+      });
+      d.synced = true;
+      localStorage.setItem(k, JSON.stringify(d));
     }catch{}
   }
-  syncing=false;
+  syncing = false;
 }
-setInterval(backgroundSync,10000);
+
+/* ================= SYNC DARI SPREADSHEET ================= */
+async function syncFromSpreadsheet(){
+  if(!navigator.onLine) return;
+
+  try{
+    const res = await fetch(GAS_URL);
+    const serverData = await res.json();
+
+    serverData.forEach(d=>{
+      const key = "parkir_" + d.nomor;
+
+      if(d.status === "PARKIR" && !localStorage.getItem(key)){
+        localStorage.setItem(key, JSON.stringify({
+          nomor: d.nomor,
+          foto: d.foto,
+          waktuMasuk: new Date(d.waktu).getTime(),
+          status: "PARKIR",
+          synced: true
+        }));
+      }
+
+      if(d.status === "KELUAR"){
+        localStorage.removeItem(key);
+      }
+    });
+
+  }catch{}
+}
+
+/* ================= AUTO BACKGROUND ================= */
+setInterval(backgroundSync, 10000);
+setInterval(syncFromSpreadsheet, 10000);
+window.addEventListener("online", backgroundSync);
 </script>
 
 </body>
