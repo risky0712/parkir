@@ -8,8 +8,8 @@
 </head>
 
 <body class="bg-gray-100">
-
 <div class="max-w-md mx-auto p-4">
+
 <h1 class="text-xl font-bold text-center mb-4">🚗 Parkir Barcode</h1>
 
 <div class="grid grid-cols-2 gap-3 mb-4">
@@ -24,27 +24,35 @@
 
 <!-- MASUK -->
 <div id="masuk" class="bg-white p-4 rounded-xl hidden">
-  <button onclick="startScan('masuk')" class="w-full bg-blue-600 text-white py-2 rounded mb-3">
-    Scan Barcode
-  </button>
+  <p class="text-center mb-2 text-gray-600">Scan QR Kendaraan</p>
   <input id="nomorMasuk" class="w-full border p-3 rounded mb-3" readonly>
-  <input type="file" accept="image/*" capture="environment" id="fotoInput" class="mb-3 w-full">
-  <button onclick="simpanMasuk()" class="w-full bg-green-600 text-white py-3 rounded-xl">
-    Simpan
-  </button>
+
+  <!-- FOTO (AUTO) -->
+  <input
+    type="file"
+    accept="image/*"
+    capture="environment"
+    id="fotoInput"
+    class="hidden"
+  >
+
+  <p id="hintFoto" class="text-center text-sm text-gray-500 hidden">
+    Mengambil foto kendaraan...
+  </p>
 </div>
 
 <!-- KELUAR -->
 <div id="keluar" class="bg-white p-4 rounded-xl hidden">
-  <button onclick="startScan('keluar')" class="w-full bg-blue-600 text-white py-2 rounded mb-3">
-    Scan Barcode
-  </button>
+  <p class="text-center mb-2 text-gray-600">Scan QR Kendaraan</p>
   <input id="nomorKeluar" class="w-full border p-3 rounded mb-3" readonly>
+
   <img id="fotoKeluar" class="hidden rounded mb-3">
+
   <button id="btnKeluar" onclick="prosesKeluar()" class="hidden w-full bg-red-600 text-white py-3 rounded-xl">
     Kendaraan Keluar
   </button>
 </div>
+
 </div>
 
 <script>
@@ -58,14 +66,27 @@ const detector = 'BarcodeDetector' in window
   : null;
 
 /* ================= UI ================= */
-function showMasuk(){ masuk.classList.remove('hidden'); keluar.classList.add('hidden'); }
-function showKeluar(){ keluar.classList.remove('hidden'); masuk.classList.add('hidden'); }
+function showMasuk(){
+  masuk.classList.remove('hidden');
+  keluar.classList.add('hidden');
+  startScan('masuk');
+}
+
+function showKeluar(){
+  keluar.classList.remove('hidden');
+  masuk.classList.add('hidden');
+  startScan('keluar');
+}
 
 /* ================= SCAN ================= */
 async function startScan(mode){
   scanMode = mode;
   scannerBox.classList.remove('hidden');
-  videoStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' }});
+
+  videoStream = await navigator.mediaDevices.getUserMedia({
+    video:{ facingMode:'environment' }
+  });
+
   video.srcObject = videoStream;
   video.play();
   scanLoop();
@@ -77,8 +98,14 @@ async function scanLoop(){
     if(codes.length){
       stopScan();
       const kode = codes[0].rawValue;
-      if(scanMode === 'masuk') nomorMasuk.value = kode;
-      else { nomorKeluar.value = kode; cekKeluar(); }
+
+      if(scanMode === 'masuk'){
+        nomorMasuk.value = kode;
+        autoAmbilFoto();   // 🔥 AUTO KE FOTO
+      } else {
+        nomorKeluar.value = kode;
+        cekKeluar();
+      }
       return;
     }
   }
@@ -87,41 +114,48 @@ async function scanLoop(){
 
 function stopScan(){
   scannerBox.classList.add('hidden');
-  if(videoStream) videoStream.getTracks().forEach(t => t.stop());
+  if(videoStream) videoStream.getTracks().forEach(t=>t.stop());
 }
 
-/* ================= MASUK ================= */
-function simpanMasuk(){
-  if(!nomorMasuk.value || !fotoInput.files[0]) return alert("Lengkapi data");
+/* ================= AUTO FOTO & SIMPAN ================= */
+function autoAmbilFoto(){
+  hintFoto.classList.remove('hidden');
+  fotoInput.click();
+}
+
+fotoInput.addEventListener("change", ()=>{
+  if(!fotoInput.files[0]) return;
 
   const reader = new FileReader();
-  reader.onload = e => {
-    localStorage.setItem("parkir_" + nomorMasuk.value, JSON.stringify({
+  reader.onload = e =>{
+    const data = {
       nomor: nomorMasuk.value,
       foto: e.target.result,
-      waktuMasuk: Date.now(),
+      waktu: Date.now(),
       status: "PARKIR",
       synced: false
-    }));
+    };
+
+    localStorage.setItem("parkir_" + data.nomor, JSON.stringify(data));
+    hintFoto.classList.add('hidden');
     nomorMasuk.value = "";
     fotoInput.value = "";
-    alert("Parkir masuk tersimpan");
+
+    backgroundSync(); // 🚀 langsung sync
+    alert("Parkir masuk berhasil");
   };
   reader.readAsDataURL(fotoInput.files[0]);
-}
+});
 
-/* ================= CEK KELUAR (LOCAL → SHEET) ================= */
+/* ================= CEK KELUAR ================= */
 async function cekKeluar(){
   const nomor = nomorKeluar.value;
   let data = JSON.parse(localStorage.getItem("parkir_" + nomor) || "null");
 
-  // jika tidak ada di local, ambil dari spreadsheet
   if(!data && navigator.onLine){
-    try{
-      const res = await fetch(GAS_URL);
-      const server = await res.json();
-      data = server.find(d => d.nomor === nomor && d.status === "PARKIR");
-    }catch{}
+    const res = await fetch(GAS_URL);
+    const server = await res.json();
+    data = server.find(d=>d.nomor===nomor && d.status==="PARKIR");
   }
 
   if(!data) return alert("Data tidak ditemukan");
@@ -134,21 +168,21 @@ async function cekKeluar(){
 /* ================= PROSES KELUAR ================= */
 function prosesKeluar(){
   const key = "parkir_" + nomorKeluar.value;
-  let d = JSON.parse(localStorage.getItem(key) || "{}");
+  let d = JSON.parse(localStorage.getItem(key));
 
   d.status = "KELUAR";
-  d.waktuKeluar = Date.now();
+  d.waktu = Date.now();
   d.synced = false;
 
   localStorage.setItem(key, JSON.stringify(d));
+  backgroundSync();
 
-  // hapus lokal SETELAH ditandai keluar
-  setTimeout(() => localStorage.removeItem(key), 1000);
+  setTimeout(()=>localStorage.removeItem(key), 1500);
 
-  alert("Kendaraan keluar");
   fotoKeluar.classList.add('hidden');
   btnKeluar.classList.add('hidden');
   nomorKeluar.value = "";
+  alert("Kendaraan keluar");
 }
 
 /* ================= SYNC KE SPREADSHEET ================= */
@@ -173,40 +207,9 @@ async function backgroundSync(){
   syncing = false;
 }
 
-/* ================= SYNC DARI SPREADSHEET ================= */
-async function syncFromSpreadsheet(){
-  if(!navigator.onLine) return;
-
-  try{
-    const res = await fetch(GAS_URL);
-    const serverData = await res.json();
-
-    serverData.forEach(d=>{
-      const key = "parkir_" + d.nomor;
-
-      if(d.status === "PARKIR" && !localStorage.getItem(key)){
-        localStorage.setItem(key, JSON.stringify({
-          nomor: d.nomor,
-          foto: d.foto,
-          waktuMasuk: new Date(d.waktu).getTime(),
-          status: "PARKIR",
-          synced: true
-        }));
-      }
-
-      if(d.status === "KELUAR"){
-        localStorage.removeItem(key);
-      }
-    });
-
-  }catch{}
-}
-
 /* ================= AUTO BACKGROUND ================= */
 setInterval(backgroundSync, 10000);
-setInterval(syncFromSpreadsheet, 10000);
 window.addEventListener("online", backgroundSync);
 </script>
-
 </body>
 </html>
